@@ -102,7 +102,7 @@ multigraph $sensorType
 graph_title $sensorLocation - $sensorType [$sensorUnit]
 graph_args --base 1000 -l 0 
 graph_vlabel $sensorUnit
-graph_category environment
+graph_category sensors
 graph_info This graph shows $sensorType history.
 EOT
                         fi
@@ -277,7 +277,7 @@ err () {
 		_errorMsg="$1"
 		_exitCode="$2"
 	else
-		_errorMsg="Fatal: An unknown error occured! Exiting..."
+		_errorMsg="Fatal: An unknown error occurred! Exiting..."
 		_exitCode="$E_UNKNOWN"
 		
 	fi

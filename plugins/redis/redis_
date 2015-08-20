@@ -35,11 +35,14 @@
 
 use strict;
 use IO::Socket::INET;
+use IO::Socket::UNIX;
 use Switch;
 
 my $HOST = exists $ENV{'host'} ? $ENV{'host'} : "127.0.0.1";
+my $UNIX_SOCKET = exists $ENV{'unixsocket'} ? $ENV{'unixsocket'} : ''; # path to Redis Unix sock file
 my $PORT = exists $ENV{'port'} ? $ENV{'port'} : 6379;
 my $PASSWORD = exists $ENV{'password'} ? $ENV{'password'} : undef;
+my $TITLE_PREFIX = exists $ENV{'title_prefix'} ? $ENV{'title_prefix'} . ": " : "";
 
 my $sock = &get_conn();
 my $config = ( defined $ARGV[0] and $ARGV[0] eq "config" );
@@ -67,30 +70,19 @@ if ( $suggest ) {
     }
 }
 
-print $sock "INFO\r\n";
-my $result = <$sock> || die "can't read socket: $!";
-
-my $rep;
-read($sock, $rep, substr($result,1)) || die "can't read from socket: $!";
-
-my $hash;
-foreach (split(/\r\n/, $rep)) {
-    my ($key,$val) = split(/:/, $_, 2);
-    if (defined($key)) {
-        $hash->{$key} = $val;
-    }
-}
-close ($sock);
+my $hash=&get_info();
 
 $0 =~ s/(.+)redis_//g;
 
 switch ($0) {
     case "connected_clients" {
         if ( $config ) {
-            print "graph_title Connected clients\n";
+            my $maxclients= get_config("maxclients")->{"maxclients"};
+            print "graph_title ${TITLE_PREFIX}Connected clients\n";
             print "graph_vlabel Connected clients\n";
             print "graph_category redis\n";
             print "graph_args -l 0\n";
+            print "connected_clients.line $maxclients:ff0000:Limit\n";
             print "connected_clients.label connected clients\n";
             exit 0;
         }
@@ -101,7 +93,7 @@ switch ($0) {
 
     case "keys_per_sec" {
         if ( $config ) {
-            print "graph_title Keys Per Second\n";
+            print "graph_title ${TITLE_PREFIX}Keys Per Second\n";
             print "graph_vlabel per \${graph_period}\n";
             print "graph_category redis\n";
             print "graph_args -l 0\n";
@@ -124,7 +116,7 @@ switch ($0) {
 
     case "key_ratio" {
         if ( $config ) {
-            print "graph_title Key Hit vs Miss Ratio\n";
+            print "graph_title ${TITLE_PREFIX}Key Hit vs Miss Ratio\n";
             print "graph_vlabel per \${graph_period}\n";
             print "graph_category redis\n";
             print "graph_args -u 100 -l 0 -r --base 1000\n";
@@ -151,7 +143,7 @@ switch ($0) {
 
     case "per_sec" {
         if ( $config ) {
-            print "graph_title Per second\n";
+            print "graph_title ${TITLE_PREFIX}Per second\n";
             print "graph_vlabel per \${graph_period}\n";
             print "graph_category redis\n";
             print "graph_args -l 0\n";
@@ -169,16 +161,21 @@ switch ($0) {
 
     case "used_memory" {
         if ( $config ) {
-            print "graph_title Used memory\n";
+            my $maxmemory = get_config("maxmemory")->{"maxmemory"};
+            print "graph_title ${TITLE_PREFIX}Used memory\n";
             print "graph_vlabel Used memory\n";
             print "graph_category redis\n";
             print "graph_args -l 0 --base 1024\n";
+            print "used_memory.line $maxmemory:ff0000:Limit\n";
             print "used_memory.label used memory\n";
-            print "used_memory.draw AREA\n";
+            print "used_memory_peak.label used memory in peak\n";
+            print "used_memory_rss.label Resident set size memory usage\n";
             exit 0;
         }
 
         print "used_memory.value ". $hash->{'used_memory'}  ."\n";
+        print "used_memory_rss.value ". $hash->{'used_memory_rss'}  ."\n";
+        print "used_memory_peak.value ". $hash->{'used_memory_peak'}  ."\n";
     }
     
     case "used_keys" {
@@ -190,7 +187,7 @@ switch ($0) {
         }
 
         if ( $config ) {
-            print "graph_title Used keys\n";
+            print "graph_title ${TITLE_PREFIX}Used keys\n";
             print "graph_vlabel Used keys\n";
             print "graph_category redis\n";
             print "graph_args -l 0\n";
@@ -210,18 +207,84 @@ switch ($0) {
     }
 }
 
+close ($sock);
+
 sub get_conn {
-    my $sock = IO::Socket::INET->new(
-        PeerAddr => $HOST,
-        PeerPort => $PORT,
-        Timeout => 10,
-        Proto => 'tcp'
-    );
+    
+    my $sock;
+    
+    if( $UNIX_SOCKET && -S $UNIX_SOCKET ){
+	
+	$sock = IO::Socket::UNIX->new(
+		Type => SOCK_STREAM(),
+		Peer => $UNIX_SOCKET,
+	);
+	
+    }else{
+	
+	$sock = IO::Socket::INET->new(
+		PeerAddr => $HOST,
+		PeerPort => $PORT,
+		Timeout => 10,
+		Proto => 'tcp'
+	);
+    }
+    
     if ( defined( $PASSWORD )  ) {
         print $sock "AUTH ", $PASSWORD, "\r\n";
         my $result = <$sock> || die "can't read socket: $!";
     }
     return $sock;
+}
+
+sub get_info{
+    print $sock "INFO\r\n";
+    my $result = <$sock> || die "can't read socket: $!";
+
+    my $rep;
+    # +2 characters for \r\n at end of the data block
+    read($sock, $rep, substr($result,1)+2) || die "can't read from socket: $!";
+
+    my $hash;
+    foreach (split(/\r\n/, substr($rep, 0, -2))) {
+        my ($key,$val) = split(/:/, $_, 2);
+        if (defined($key)) {
+            $hash->{$key} = $val;
+        }
+    }
+    return $hash;
+}
+
+# This subroutine returns configuration matched to supplied as object
+sub get_config{
+
+    print $sock "*3\r\n\$6\r\nCONFIG\r\n\$3\r\nGET\r\n\$".length($_[0])."\r\n".$_[0]."\r\n";
+    # Response will look like like
+    # *2\r\n$9\r\nmaxmemory\r\n$10\r\n3221225472\r\n
+
+    my $type = <$sock> || die "can't read socket: $!";
+
+    my $conf;
+    if( substr($type,0,1) ne "*" ) {
+        return $conf;
+    }
+
+    my $count=substr($type,1);
+
+    my ( $namesize, $name, $valuesize, $value );
+    while ( $count > 1 ){
+        $count=$count-2;
+
+        $namesize=<$sock>;
+        read($sock, $name, substr($namesize,1)+2) || die "can't read from socket: $!";
+
+        $valuesize=<$sock>;
+        read($sock, $value, substr($valuesize,1)+2) || die "can't read from socket: $!";
+
+        $conf->{substr($name, 0, -2)}=substr($value, 0, -2);
+    }
+
+    return $conf;
 }
 
 # vim: ft=perl ai ts=4 sw=4 et:

@@ -10,12 +10,15 @@
 # set path to your rails app
 RAILS_ROOT = "/path/to/rails/app"
 
+# set name to your unicorn.pid
+PID_NAME = "unicorn.pid"
+
 module Munin
   class UnicornMemoryStatus
     attr_reader :pid_file
 
-    def initialize(rails_root)
-      @pid_file = "#{rails_root}/tmp/pids/unicorn.pid"
+    def initialize(rails_root, pid_name)
+      @pid_file = "#{rails_root}/tmp/pids/#{pid_name}"
     end
 
     def master_pid
@@ -38,18 +41,18 @@ module Munin
       result = 0
       memory = memory_usage
       result += memory[:master][master_pid]
-      memory[:worker].each do |pid, memory|
-        result += memory
+      memory[:worker].each do |pid, worker_memory|
+        result += worker_memory
       end
       result
     end
 
     def memory_usage
       result = { :master => {master_pid => nil}, :worker => {} }
-      ps_output = `ps auxw | grep unicorn_rails`
+      ps_output = `ps auxw | grep unicorn`
       ps_output.split("\n").each do |line|
         chunks = line.strip.split(/\s+/, 11)
-        pid, pmem_rss, pcmd = chunks.values_at(1, 5, 10)
+        pid, pmem_rss, _ = chunks.values_at(1, 5, 10)
         pmem = pmem_rss.to_i * 1024
         pid = pid.to_i
 
@@ -68,13 +71,13 @@ case ARGV[0]
 when "autoconf"
   puts "yes"
 when "config"
-  puts "graph_title Unicorn - Memory usage"
+  puts "graph_title Unicorn [#{File.basename(__FILE__).gsub(/^unicorn_memory_status_/, '')}] - Memory usage"
   puts "graph_args --base 1024 -l 0"
   puts "graph_vlabel bytes"
   puts "graph_category Unicorn"
   puts "total_memory.label total_memory"
   puts "total_memory.draw LINE2"
 else
-  m = Munin::UnicornMemoryStatus.new(ENV['rails_root'] || RAILS_ROOT)
+  m = Munin::UnicornMemoryStatus.new(ENV['rails_root'] || RAILS_ROOT, ENV['pid_name'] || PID_NAME)
   puts "total_memory.value #{m.total_memory}"
 end

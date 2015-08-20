@@ -110,7 +110,7 @@ sub do_config_vol
     }
     print "graph_args --base 1000 --lower-limit 0 --rigid\n";
     print "graph_vlabel sis status\n";
-    print "graph_category sis\n";
+    print "graph_category netapp\n";
     print "graph_order sisInitialising sisRunning sisPending sisDebug\n";
     foreach my $state ("debug", "initialising", "running", "pending")
     {
@@ -144,11 +144,11 @@ sub do_fetch_root
         }
         elsif ($status == 2 )
         {
-            $sisSumIni++; #sis intialising
+            $sisSumIni++; #sis initialising
         }
         elsif ( $status == 3)
         {
-            $sisSumRun++; #sis runnung
+            $sisSumRun++; #sis running
         }
         elsif ( $status == 5)
         {

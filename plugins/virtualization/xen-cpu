@@ -5,7 +5,7 @@
 # Author: Adam Crews <doo <at> shroom <dot> com>
 # 
 # License: GPL
-# Based on the origional xen script from Matthias Pfafferodt, syntron at web.de
+# Based on the original xen script from Matthias Pfafferodt, syntron at web.de
 #
 # Note: Your munin config must run this as root.
 #
@@ -53,7 +53,7 @@ if (defined($ARGV[0])) {
 			'graph_title' => 'Xen Domain CPU Usage',
 			'graph_args' => '--base 1000 -l 0 --upper-limit 100 --rigid',
 			'graph_vlabel' => 'Percent (%)',
-			'graph_category' => 'xen',
+			'graph_category' => 'Virtualization',
 			'graph_info' => 'Display the % of CPU Usage for each domain',
 		);	
 
